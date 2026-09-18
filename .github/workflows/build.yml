@@ -16,23 +16,28 @@ jobs:
 
     steps:
 
+      # 1. GitHub repository
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 2. Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # 3. Java
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+      # 4. Linux dependencies
       - name: Install system dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
             git \
             wget \
@@ -51,7 +56,7 @@ jobs:
             libffi-dev \
             libssl-dev
 
-      # Android SDK Command Line Tools
+      # 5. Android SDK Command Line Tools
       - name: Install Android SDK
         run: |
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
@@ -60,55 +65,94 @@ jobs:
 
           wget -q \
             https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
-            -O cmdline-tools.zip
+            -O android-cmdline-tools.zip
 
-          unzip -q cmdline-tools.zip
+          unzip -q android-cmdline-tools.zip
 
-          mv cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          mv cmdline-tools \
+            "$ANDROID_SDK_ROOT/cmdline-tools/latest"
 
           echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+
           echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
           echo "$ANDROID_SDK_ROOT/build-tools/35.0.0" >> "$GITHUB_PATH"
 
-      # Android packages
-      - name: Install Android packages
+      # 6. Android SDK packages
+      - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
+          yes | sdkmanager \
+            --sdk_root="$ANDROID_SDK_ROOT" \
+            --licenses || true
 
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
+          sdkmanager \
+            --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      # Check SDK
+      # 7. Verify Android SDK
       - name: Verify Android SDK
         run: |
-          echo "SDK:"
+          echo "================================"
+          echo "ANDROID SDK"
+          echo "================================"
+
           echo "$ANDROID_SDK_ROOT"
 
           echo ""
-          echo "Build Tools:"
+          echo "================================"
+          echo "BUILD TOOLS"
+          echo "================================"
+
           ls -la "$ANDROID_SDK_ROOT/build-tools"
 
           echo ""
-          echo "AIDL:"
+          echo "================================"
+          echo "AIDL"
+          echo "================================"
+
           find "$ANDROID_SDK_ROOT/build-tools" \
             -type f \
             -name "aidl" \
             -print
 
           echo ""
-          echo "AIDL version:"
-          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aidl" --version
+          echo "Checking AIDL executable..."
 
-      # Python tools
+          test -x \
+            "$ANDROID_SDK_ROOT/build-tools/35.0.0/aidl"
+
+          echo "AIDL executable: OK"
+
+      # 8. Install Buildozer
       - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip
+
           pip install buildozer
+
           pip install cython==0.29.36
 
-      # Make sure Buildozer uses our SDK
+      # 9. Check project
+      - name: Check project
+        run: |
+          echo "================================"
+          echo "PROJECT FILES"
+          echo "================================"
+
+          ls -la
+
+          if [ ! -f buildozer.spec ]; then
+            echo ""
+            echo "ERROR: buildozer.spec not found!"
+            exit 1
+          fi
+
+          echo ""
+          echo "buildozer.spec: OK"
+
+      # 10. Configure Buildozer
       - name: Configure Buildozer
         run: |
           mkdir -p ~/.buildozer
@@ -118,36 +162,37 @@ jobs:
           android.sdk_path = $ANDROID_SDK_ROOT
           EOF
 
-      # Check project
-      - name: Check project
+          echo "Buildozer SDK:"
+          cat ~/.buildozer/config.ini
+
+      # 11. Clean previous builds
+      - name: Clean Buildozer
         run: |
-          echo "Project:"
-          ls -la
+          rm -rf .buildozer
+          rm -rf bin
 
-          if [ ! -f buildozer.spec ]; then
-            echo "ERROR: buildozer.spec not found!"
-            exit 1
-          fi
-
-          echo "buildozer.spec found!"
-
-      # Build
+      # 12. Build APK
       - name: Build Kasper Hack APK
         env:
           BUILDOZER_WARN_ON_ROOT: "1"
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
         run: |
           buildozer -v android debug
 
-      # Find APK
+      # 13. Find APK
       - name: Find APK
         run: |
-          echo "=============================="
-          echo "APK FILES"
-          echo "=============================="
+          echo "================================"
+          echo "GENERATED APK"
+          echo "================================"
 
-          find . -type f -name "*.apk" -print
+          find . \
+            -type f \
+            -name "*.apk" \
+            -print
 
-      # Upload
+      # 14. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
