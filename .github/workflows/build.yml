@@ -12,21 +12,21 @@ jobs:
 
     steps:
 
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Set up Java
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Install system packages
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -46,7 +46,7 @@ jobs:
             libffi-dev \
             libssl-dev
 
-      - name: Install Buildozer
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install buildozer
@@ -54,18 +54,78 @@ jobs:
 
       - name: Check buildozer.spec
         run: |
-          if [ ! -f buildozer.spec ]; then
-            echo "ERROR: buildozer.spec not found!"
+          test -f buildozer.spec
+          echo "buildozer.spec OK"
+
+      - name: Prepare Buildozer
+        run: |
+          buildozer android clean || true
+
+      - name: Initialize Buildozer
+        run: |
+          buildozer android debug --help || true
+
+      - name: Install Android Build Tools
+        run: |
+          SDK="/home/runner/.buildozer/android/platform/android-sdk"
+
+          echo "SDK location:"
+          echo "$SDK"
+
+          if [ ! -d "$SDK" ]; then
+            echo "ERROR: Android SDK was not created."
             exit 1
           fi
 
-          echo "buildozer.spec found."
-          ls -la
+          echo "SDK contents:"
+          ls -la "$SDK"
 
-      - name: Clean old Buildozer files
+          CMDLINE="$SDK/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -f "$CMDLINE" ]; then
+            CMDLINE=$(find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -n 1)
+          fi
+
+          if [ -z "$CMDLINE" ]; then
+            echo "ERROR: sdkmanager not found."
+            find "$SDK" -maxdepth 5 -type f | head -100
+            exit 1
+          fi
+
+          echo "Using sdkmanager:"
+          echo "$CMDLINE"
+
+          yes | "$CMDLINE" --licenses || true
+
+          "$CMDLINE" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+          echo "Build tools installed:"
+          ls -la "$SDK/build-tools"
+
+          echo "AIDL:"
+          find "$SDK/build-tools" -type f -name aidl -print
+
+      - name: Verify AIDL
         run: |
-          rm -rf .buildozer
-          rm -rf bin
+          SDK="/home/runner/.buildozer/android/platform/android-sdk"
+
+          AIDL=$(find "$SDK/build-tools" -type f -name aidl | head -n 1)
+
+          if [ -z "$AIDL" ]; then
+            echo "ERROR: AIDL still not found!"
+            exit 1
+          fi
+
+          echo "AIDL found:"
+          echo "$AIDL"
+
+          chmod +x "$AIDL"
+
+          echo "Testing AIDL..."
+          "$AIDL" --version
 
       - name: Build APK
         env:
@@ -73,14 +133,15 @@ jobs:
         run: |
           buildozer -v android debug
 
-      - name: Show APK files
+      - name: Find APK
         run: |
-          echo "APK files:"
-          find bin -type f -name "*.apk" -print
+          echo "Searching for APK..."
+          find . -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Kasper-Hack-APK
-          path: bin/*.apk
-          if-no-files-found: error
+          path: |
+            bin/*.apk
+          if-no-files-found: error 
