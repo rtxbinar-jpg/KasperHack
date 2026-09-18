@@ -10,9 +10,13 @@ jobs:
   build:
     runs-on: ubuntu-22.04
 
+    env:
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+      ANDROID_HOME: ${{ github.workspace }}/android-sdk
+
     steps:
 
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -31,10 +35,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             git \
-            zip \
-            unzip \
             wget \
             curl \
+            unzip \
+            zip \
+            build-essential \
             autoconf \
             automake \
             libtool \
@@ -46,33 +51,64 @@ jobs:
             libffi-dev \
             libssl-dev
 
+      # Android SDK Command Line Tools
       - name: Install Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
 
+          cd /tmp
+
+          wget -q \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+            -O cmdline-tools.zip
+
+          unzip -q cmdline-tools.zip
+
+          mv cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/build-tools/35.0.0" >> "$GITHUB_PATH"
+
+      # Android packages
       - name: Install Android packages
         run: |
+          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
+
           sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
+      # Check SDK
       - name: Verify Android SDK
         run: |
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "SDK:"
+          echo "$ANDROID_SDK_ROOT"
 
+          echo ""
           echo "Build Tools:"
           ls -la "$ANDROID_SDK_ROOT/build-tools"
 
+          echo ""
           echo "AIDL:"
-          find "$ANDROID_SDK_ROOT/build-tools" -name aidl -type f
+          find "$ANDROID_SDK_ROOT/build-tools" \
+            -type f \
+            -name "aidl" \
+            -print
 
+          echo ""
+          echo "AIDL version:"
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aidl" --version
+
+      # Python tools
       - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip
           pip install buildozer
           pip install cython==0.29.36
 
+      # Make sure Buildozer uses our SDK
       - name: Configure Buildozer
         run: |
           mkdir -p ~/.buildozer
@@ -80,31 +116,38 @@ jobs:
           cat > ~/.buildozer/config.ini <<EOF
           [buildozer]
           android.sdk_path = $ANDROID_SDK_ROOT
-          android.ndk_path =
           EOF
 
-      - name: Check buildozer.spec
+      # Check project
+      - name: Check project
         run: |
+          echo "Project:"
+          ls -la
+
           if [ ! -f buildozer.spec ]; then
-            echo "ERROR: buildozer.spec not found"
+            echo "ERROR: buildozer.spec not found!"
             exit 1
           fi
 
-          echo "buildozer.spec found"
+          echo "buildozer.spec found!"
 
-      - name: Build APK
+      # Build
+      - name: Build Kasper Hack APK
         env:
           BUILDOZER_WARN_ON_ROOT: "1"
-          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
         run: |
           buildozer -v android debug
 
-      - name: Show APK
+      # Find APK
+      - name: Find APK
         run: |
-          echo "APK files:"
-          find bin -type f -name "*.apk" -print
+          echo "=============================="
+          echo "APK FILES"
+          echo "=============================="
 
+          find . -type f -name "*.apk" -print
+
+      # Upload
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
