@@ -26,7 +26,7 @@ version = 1.0
 
 # (list) Python dependencies
 # IMPORTANT: do NOT add "android" here
-requirements = python3,kivy
+requirements = python3,kivy==2.2.1
 
 # (str) Supported orientation
 orientation = portrait
