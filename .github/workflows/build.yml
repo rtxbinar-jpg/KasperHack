@@ -8,82 +8,76 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
 
-      # 1. Repository'ni yuklash
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Python o'rnatish
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3. Java o'rnatish
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # 4. Android SDK sozlash
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      # 5. Kerakli Android SDK paketlarini o'rnatish
-      - name: Install Android SDK packages
+      - name: Install system packages
         run: |
-          sdkmanager "platform-tools"
-          sdkmanager "platforms;android-35"
-          sdkmanager "build-tools;35.0.0"
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            zip \
+            unzip \
+            wget \
+            curl \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            cmake \
+            libffi-dev \
+            libssl-dev
 
-          yes | sdkmanager --licenses || true
-
-      # 6. Python paketlarini o'rnatish
-      - name: Install Python dependencies
+      - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip
           pip install buildozer
           pip install cython==0.29.36
 
-      # 7. Buildozer cache
-      - name: Cache Buildozer
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            buildozer-${{ runner.os }}-
-
-      # 8. Android SDK yo'llarini aniqlash
-      - name: Configure Android environment
+      - name: Check buildozer.spec
         run: |
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          if [ ! -f buildozer.spec ]; then
+            echo "ERROR: buildozer.spec not found!"
+            exit 1
+          fi
 
-      # 9. AIDL mavjudligini tekshirish
-      - name: Check Android Build Tools
+          echo "buildozer.spec found."
+          ls -la
+
+      - name: Clean old Buildozer files
         run: |
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          echo "Android SDK:"
-          ls -la "$ANDROID_SDK_ROOT"
+          rm -rf .buildozer
+          rm -rf bin
 
-          echo "Build Tools:"
-          ls -la "$ANDROID_SDK_ROOT/build-tools"
-
-          echo "AIDL:"
-          find "$ANDROID_SDK_ROOT/build-tools" -name aidl -type f
-
-      # 10. Buildozer orqali APK yaratish
       - name: Build APK
+        env:
+          BUILDOZER_WARN_ON_ROOT: "1"
         run: |
-          buildozer android debug
+          buildozer -v android debug
 
-      # 11. APK'ni GitHub Actions artifact sifatida saqlash
+      - name: Show APK files
+        run: |
+          echo "APK files:"
+          find bin -type f -name "*.apk" -print
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
