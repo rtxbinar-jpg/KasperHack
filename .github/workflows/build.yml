@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -25,14 +26,16 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install dependencies
+      - name: Install system packages
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             git \
-            zip \
+            wget \
+            curl \
             unzip \
-            openjdk-17-jdk \
+            zip \
+            build-essential \
             autoconf \
             automake \
             libtool \
@@ -42,15 +45,7 @@ jobs:
             libncursesw5-dev \
             cmake \
             libffi-dev \
-            libssl-dev \
-            automake \
-            autopoint \
-            gettext
-
-      - name: Install Rust
-        run: |
-          curl https://sh.rustup.rs -sSf | sh -s -- -y
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            libssl-dev
 
       - name: Install Buildozer
         run: |
@@ -58,30 +53,170 @@ jobs:
           pip install buildozer==1.6.0
           pip install cython==0.29.36
 
-      - name: Fix buildozer.spec
+      # ------------------------------------------------
+      # ANDROID SDK
+      # ------------------------------------------------
+
+      - name: Prepare Android SDK
         run: |
-          sed -i 's/^requirements =.*/requirements = python3,kivy==2.2.1/' buildozer.spec
 
-          sed -i 's/^android.api =.*/android.api = 35/' buildozer.spec
-          sed -i 's/^android.minapi =.*/android.minapi = 24/' buildozer.spec
-          sed -i 's/^android.ndk =.*/android.ndk = 28c/' buildozer.spec
-          sed -i 's/^android.archs =.*/android.archs = arm64-v8a/' buildozer.spec
+          SDK="/home/runner/.buildozer/android/platform/android-sdk"
 
-          echo "===== BUILDОZER SPEC ====="
+          rm -rf "$SDK"
+
+          mkdir -p "$SDK/cmdline-tools"
+
+          cd /tmp
+
+          wget -q \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+            -O cmdline.zip
+
+          unzip -q cmdline.zip
+
+          mv cmdline-tools "$SDK/cmdline-tools/latest"
+
+          mkdir -p "$SDK/tools/bin"
+
+          ln -sf \
+            "$SDK/cmdline-tools/latest/bin/sdkmanager" \
+            "$SDK/tools/bin/sdkmanager"
+
+          ln -sf \
+            "$SDK/cmdline-tools/latest/bin/avdmanager" \
+            "$SDK/tools/bin/avdmanager"
+
+          chmod +x \
+            "$SDK/cmdline-tools/latest/bin/sdkmanager"
+
+          echo "SDK prepared"
+
+      - name: Accept Android licenses
+        run: |
+
+          SDK="/home/runner/.buildozer/android/platform/android-sdk"
+
+          yes | "$SDK/tools/bin/sdkmanager" \
+            --sdk_root="$SDK" \
+            --licenses || true
+
+      - name: Install exact Android SDK versions
+        run: |
+
+          SDK="/home/runner/.buildozer/android/platform/android-sdk"
+
+          "$SDK/tools/bin/sdkmanager" \
+            --sdk_root="$SDK" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+          echo "Installed:"
+          ls -la "$SDK/build-tools"
+          ls -la "$SDK/platforms"
+
+      # ------------------------------------------------
+      # FORCE BUILDOZER TO USE OUR SDK
+      # ------------------------------------------------
+
+      - name: Configure buildozer.spec
+        run: |
+
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path("buildozer.spec")
+          text = p.read_text()
+
+          lines = text.splitlines()
+
+          output = []
+
+          for line in lines:
+              if line.startswith("android.sdk_path"):
+                  continue
+
+              if line.startswith("android.skip_update"):
+                  continue
+
+              if line.startswith("android.accept_sdk_license"):
+                  continue
+
+              output.append(line)
+
+          output.append("")
+          output.append("android.sdk_path = /home/runner/.buildozer/android/platform/android-sdk")
+          output.append("android.skip_update = True")
+          output.append("android.accept_sdk_license = True")
+
+          p.write_text("\n".join(output) + "\n")
+          PY
+
+          echo "===== BUILDOZER SPEC ====="
           cat buildozer.spec
 
-      - name: Build APK
+      # ------------------------------------------------
+      # VERIFY
+      # ------------------------------------------------
+
+      - name: Verify Android SDK
+        run: |
+
+          SDK="/home/runner/.buildozer/android/platform/android-sdk"
+
+          echo "SDK = $SDK"
+
+          echo ""
+          echo "SDKMANAGER:"
+          test -x "$SDK/tools/bin/sdkmanager"
+          echo "OK"
+
+          echo ""
+          echo "BUILD TOOLS:"
+          ls -la "$SDK/build-tools"
+
+          echo ""
+          echo "AIDL:"
+          test -x "$SDK/build-tools/35.0.0/aidl"
+          echo "AIDL 35.0.0 OK"
+
+          echo ""
+          echo "PLATFORM:"
+          test -d "$SDK/platforms/android-35"
+          echo "ANDROID 35 OK"
+
+      # ------------------------------------------------
+      # BUILD
+      # ------------------------------------------------
+
+      - name: Build Kasper Hack
         env:
           BUILDOZER_WARN_ON_ROOT: "1"
-          P4A_NO_BUILDOPTS: "1"
         run: |
+
           buildozer android clean || true
+
           buildozer -v android debug
+
+      # ------------------------------------------------
+      # FIND APK
+      # ------------------------------------------------
 
       - name: Find APK
         run: |
-          echo "===== APK FILES ====="
-          find . -type f -name "*.apk" -print
+
+          echo "================================="
+          echo "APK FILES"
+          echo "================================="
+
+          find . \
+            -type f \
+            -name "*.apk" \
+            -print
+
+      # ------------------------------------------------
+      # UPLOAD
+      # ------------------------------------------------
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
